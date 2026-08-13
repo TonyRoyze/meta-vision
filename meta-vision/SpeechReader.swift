@@ -10,10 +10,11 @@ final class SpeechReader: NSObject, AVSpeechSynthesizerDelegate {
         synthesizer.delegate = self
     }
 
-    func speak(_ text: String) {
+    func speak(_ text: String, rate: Float) {
         synthesizer.stopSpeaking(at: .immediate)
         let utterance = AVSpeechUtterance(string: text)
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate * 0.9
+        utterance.rate = max(AVSpeechUtteranceMinimumSpeechRate,
+                             min(rate, AVSpeechUtteranceMaximumSpeechRate))
         utterance.voice = AVSpeechSynthesisVoice(language: Locale.current.language.languageCode?.identifier)
         synthesizer.speak(utterance)
     }

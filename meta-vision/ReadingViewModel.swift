@@ -7,22 +7,36 @@ final class ReadingViewModel: ObservableObject {
     @Published private(set) var recognizedText = ""
     @Published var isShowingError = false
     @Published private(set) var errorMessage: String?
+    @Published private(set) var history: [ReadingRecord]
+    @Published var speechRate: Double {
+        didSet { UserDefaults.standard.set(speechRate, forKey: "speechRate") }
+    }
 
     private let glasses: any GlassesCaptureProviding
     private let recognizer: VisionTextRecognizer
+    private let qualityAssessor: DocumentQualityAssessor
     private let speechReader: SpeechReader
+    private let historyStore: ReadingHistoryStore
     private var readTask: Task<Void, Never>?
 
     init(
         glasses: (any GlassesCaptureProviding)? = nil,
         recognizer: VisionTextRecognizer? = nil,
-        speechReader: SpeechReader? = nil
+        qualityAssessor: DocumentQualityAssessor? = nil,
+        speechReader: SpeechReader? = nil,
+        historyStore: ReadingHistoryStore? = nil
     ) {
         let resolvedGlasses = glasses ?? MockGlassesCaptureProvider()
         let resolvedSpeechReader = speechReader ?? SpeechReader()
         self.glasses = resolvedGlasses
         self.recognizer = recognizer ?? VisionTextRecognizer()
+        self.qualityAssessor = qualityAssessor ?? DocumentQualityAssessor()
         self.speechReader = resolvedSpeechReader
+        let resolvedHistoryStore = historyStore ?? ReadingHistoryStore()
+        self.historyStore = resolvedHistoryStore
+        self.history = resolvedHistoryStore.load()
+        let storedRate = UserDefaults.standard.double(forKey: "speechRate")
+        self.speechRate = storedRate == 0 ? 0.45 : storedRate
         resolvedSpeechReader.didFinish = { [weak self] in
             guard let self, self.status == .speaking else { return }
             self.status = .ready(deviceName: resolvedGlasses.deviceName)
@@ -64,13 +78,18 @@ final class ReadingViewModel: ObservableObject {
                 let image = try await glasses.captureDocument()
                 try Task.checkCancellation()
 
+                status = .checkingQuality
+                _ = try qualityAssessor.assess(image)
+                try Task.checkCancellation()
+
                 status = .recognizing
                 let text = try await recognizer.recognizeText(in: image)
                 try Task.checkCancellation()
 
                 recognizedText = text
+                history = historyStore.add(text: text, to: history)
                 status = .speaking
-                speechReader.speak(text)
+                speechReader.speak(text, rate: Float(speechRate))
             } catch is CancellationError {
                 status = .ready(deviceName: glasses.deviceName)
             } catch {
@@ -82,7 +101,7 @@ final class ReadingViewModel: ObservableObject {
     func repeatText() {
         guard !recognizedText.isEmpty else { return }
         status = .speaking
-        speechReader.speak(recognizedText)
+        speechReader.speak(recognizedText, rate: Float(speechRate))
     }
 
     func summarize() {
@@ -92,7 +111,22 @@ final class ReadingViewModel: ObservableObject {
             .prefix(2)
             .joined(separator: ". ")
         status = .speaking
-        speechReader.speak("Summary. \(summary).")
+        speechReader.speak("Summary. \(summary).", rate: Float(speechRate))
+    }
+
+    func previewVoice() {
+        speechReader.speak("This is how Meta Vision will read documents aloud.",
+                           rate: Float(speechRate))
+    }
+
+    func open(_ record: ReadingRecord) {
+        recognizedText = record.text
+        status = .speaking
+        speechReader.speak(record.text, rate: Float(speechRate))
+    }
+
+    func deleteHistory(at offsets: IndexSet) {
+        history = historyStore.delete(at: offsets, from: history)
     }
 
     func stopSpeaking() {
@@ -113,6 +147,7 @@ enum ReadingStatus: Equatable {
     case connectionFailed
     case ready(deviceName: String)
     case capturing
+    case checkingQuality
     case recognizing
     case speaking
 
@@ -122,6 +157,7 @@ enum ReadingStatus: Equatable {
         case .connectionFailed: "Glasses unavailable"
         case .ready: "Glasses connected"
         case .capturing: "Taking a picture"
+        case .checkingQuality: "Checking image quality"
         case .recognizing: "Reading the document"
         case .speaking: "Speaking"
         }
@@ -133,6 +169,7 @@ enum ReadingStatus: Equatable {
         case .connectionFailed: "Check the connection and try again."
         case .ready(let deviceName): deviceName
         case .capturing: "Hold still for a moment."
+        case .checkingQuality: "Checking lighting and image size."
         case .recognizing: "Finding and checking text on device."
         case .speaking: "Reading through the selected audio output."
         }
@@ -141,6 +178,7 @@ enum ReadingStatus: Equatable {
     var actionTitle: String {
         switch self {
         case .capturing: "Capturing…"
+        case .checkingQuality: "Checking quality…"
         case .recognizing: "Recognizing…"
         case .speaking: "Speaking…"
         case .connectionFailed: "Try again"
@@ -154,6 +192,7 @@ enum ReadingStatus: Equatable {
         case .connectionFailed: "exclamationmark.triangle.fill"
         case .ready: "checkmark.circle.fill"
         case .capturing: "camera.fill"
+        case .checkingQuality: "sun.max.fill"
         case .recognizing: "text.viewfinder"
         case .speaking: "speaker.wave.2.fill"
         }
@@ -163,13 +202,13 @@ enum ReadingStatus: Equatable {
         switch self {
         case .ready: .green
         case .connectionFailed: .red
-        case .connecting, .capturing, .recognizing, .speaking: .accentColor
+        case .connecting, .capturing, .checkingQuality, .recognizing, .speaking: .accentColor
         }
     }
 
     var isBusy: Bool {
         switch self {
-        case .capturing, .recognizing, .speaking: true
+        case .capturing, .checkingQuality, .recognizing, .speaking: true
         case .connecting, .connectionFailed, .ready: false
         }
     }

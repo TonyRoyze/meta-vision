@@ -8,7 +8,7 @@ The planned experience is:
 
 ## Current status
 
-The first runnable vertical slice is implemented. It uses a mock glasses provider to capture a generated document, Apple Vision for on-device OCR, and AVFoundation to read recognized text aloud. The UI also supports repeat, a basic local summary, and stop controls.
+The first runnable vertical slice is implemented. It uses a mock glasses provider to capture a generated document, checks image quality, runs Apple Vision OCR, and reads recognized text aloud with AVFoundation. The UI also supports repeat, a basic local summary, stop, adjustable speech speed, and an on-device recent-reading history.
 
 Physical glasses integration, Gemma verification, image-quality guidance, and hands-free voice commands are still planned.
 

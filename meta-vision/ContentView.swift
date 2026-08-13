@@ -2,6 +2,8 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var viewModel = ReadingViewModel()
+    @State private var isShowingHistory = false
+    @State private var isShowingSettings = false
 
     var body: some View {
         NavigationStack {
@@ -15,6 +17,18 @@ struct ContentView: View {
             }
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("Meta Vision")
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button("History", systemImage: "clock.arrow.circlepath") {
+                        isShowingHistory = true
+                    }
+                    .accessibilityHint("Shows recent documents read on this device")
+
+                    Button("Settings", systemImage: "gearshape") {
+                        isShowingSettings = true
+                    }
+                }
+            }
         }
         .task {
             await viewModel.connect()
@@ -26,6 +40,92 @@ struct ContentView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(viewModel.errorMessage ?? "Please try again.")
+        }
+        .sheet(isPresented: $isShowingHistory) {
+            historyView
+        }
+        .sheet(isPresented: $isShowingSettings) {
+            settingsView
+        }
+    }
+
+    private var historyView: some View {
+        NavigationStack {
+            Group {
+                if viewModel.history.isEmpty {
+                    ContentUnavailableView(
+                        "No recent readings",
+                        systemImage: "doc.text.magnifyingglass",
+                        description: Text("Documents you read will appear here and stay on this device.")
+                    )
+                } else {
+                    List {
+                        ForEach(viewModel.history) { record in
+                            Button {
+                                viewModel.open(record)
+                                isShowingHistory = false
+                            } label: {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(record.title)
+                                        .font(.headline)
+                                        .lineLimit(1)
+                                    Text(record.capturedAt, format: .dateTime.month().day().hour().minute())
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .onDelete(perform: viewModel.deleteHistory)
+                    }
+                }
+            }
+            .navigationTitle("Recent readings")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { isShowingHistory = false }
+                }
+            }
+        }
+    }
+
+    private var settingsView: some View {
+        NavigationStack {
+            Form {
+                Section("Speech") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Label("Speaking speed", systemImage: "speaker.wave.2")
+                            Spacer()
+                            Text(viewModel.speechRate, format: .number.precision(.fractionLength(2)))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                        Slider(value: $viewModel.speechRate, in: 0.30...0.60, step: 0.05) {
+                            Text("Speaking speed")
+                        } minimumValueLabel: {
+                            Image(systemName: "tortoise")
+                        } maximumValueLabel: {
+                            Image(systemName: "hare")
+                        }
+                    }
+
+                    Button("Preview voice") {
+                        viewModel.previewVoice()
+                    }
+                }
+
+                Section("Privacy") {
+                    Label("OCR and reading history stay on this device.", systemImage: "lock.shield")
+                }
+            }
+            .navigationTitle("Settings")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { isShowingSettings = false }
+                }
+            }
         }
     }
 
