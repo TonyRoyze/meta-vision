@@ -1,0 +1,51 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Xcode user-specific data
+*.xcuserstate
+xcuserdata/
+*.xccheckout
+*.moved-aside
+
+# Xcode build output
+build/
+DerivedData/
+*.build/
+*.ipa
+*.dSYM
+*.dSYM.zip
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# CocoaPods
+Pods/
+
+# Fastlane output
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output/
+
+# Coverage and test output
+*.xccovreport
+*.xcresult
+coverage/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.p12
+*.mobileprovision
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+.idea/
+.vscode/
