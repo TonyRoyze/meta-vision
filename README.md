@@ -8,7 +8,9 @@ The planned experience is:
 
 ## Current status
 
-This repository contains the initial SwiftUI iOS project foundation and the product roadmap. The glasses integration, OCR pipeline, Gemma integration, and hands-free controls are planned next.
+The first runnable vertical slice is implemented. It uses a mock glasses provider to capture a generated document, Apple Vision for on-device OCR, and AVFoundation to read recognized text aloud. The UI also supports repeat, a basic local summary, and stop controls.
+
+Physical glasses integration, Gemma verification, image-quality guidance, and hands-free voice commands are still planned.
 
 ## Planned MVP
 
@@ -40,7 +42,7 @@ This repository contains the initial SwiftUI iOS project foundation and the prod
 1. Open `meta-vision.xcodeproj` in Xcode.
 2. Select an iPhone simulator or connected iPhone.
 3. Build and run the `meta-vision` target.
-4. Follow [PLAN.md](PLAN.md) for the next implementation milestone.
+4. Tap **Read this** to exercise the mock capture, OCR, and speech pipeline.
 
 ## Accessibility and privacy goals
 
