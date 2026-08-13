@@ -10,8 +10,6 @@ The planned experience is:
 
 This repository contains the initial SwiftUI iOS project foundation and the product roadmap. The glasses integration, OCR pipeline, Gemma integration, and hands-free controls are planned next.
 
-See [PLAN.md](PLAN.md) for the implementation roadmap.
-
 ## Planned MVP
 
 - Connect to standard Meta Ray-Ban glasses.
