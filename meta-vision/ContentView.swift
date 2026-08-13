@@ -1,9 +1,13 @@
 import SwiftUI
+import UniformTypeIdentifiers
+import UIKit
 
 struct ContentView: View {
     @StateObject private var viewModel = ReadingViewModel()
     @State private var isShowingHistory = false
     @State private var isShowingSettings = false
+    @State private var isShowingCamera = false
+    @State private var isImportingGemma = false
 
     var body: some View {
         NavigationStack {
@@ -30,14 +34,8 @@ struct ContentView: View {
                 }
             }
         }
-        .task {
-            await viewModel.connect()
-        }
         .alert("Something went wrong", isPresented: $viewModel.isShowingError) {
-            Button("Try again") {
-                viewModel.retry()
-            }
-            Button("Cancel", role: .cancel) {}
+            Button("OK") { viewModel.clearError() }
         } message: {
             Text(viewModel.errorMessage ?? "Please try again.")
         }
@@ -46,6 +44,23 @@ struct ContentView: View {
         }
         .sheet(isPresented: $isShowingSettings) {
             settingsView
+        }
+        .fullScreenCover(isPresented: $isShowingCamera) {
+            CameraCaptureView { image in
+                isShowingCamera = false
+                viewModel.processCapturedImage(image)
+            } onCancel: {
+                isShowingCamera = false
+            }
+            .ignoresSafeArea()
+        }
+        .fileImporter(
+            isPresented: $isImportingGemma,
+            allowedContentTypes: [.data],
+            allowsMultipleSelection: false
+        ) { result in
+            guard case .success(let urls) = result, let url = urls.first else { return }
+            Task { await viewModel.installGemmaModel(from: url) }
         }
     }
 
@@ -93,6 +108,26 @@ struct ContentView: View {
     private var settingsView: some View {
         NavigationStack {
             Form {
+                Section("Gemma") {
+                    LabeledContent("On-device model") {
+                        Label(
+                            viewModel.isGemmaConfigured ? "Ready" : "Not installed",
+                            systemImage: viewModel.isGemmaConfigured
+                                ? "checkmark.circle.fill"
+                                : "exclamationmark.circle"
+                        )
+                        .foregroundStyle(viewModel.isGemmaConfigured ? .green : .orange)
+                    }
+
+                    Button(viewModel.isGemmaConfigured ? "Replace Gemma model" : "Import Gemma model") {
+                        isImportingGemma = true
+                    }
+
+                    Text("Select a compatible Gemma `.litertlm` model downloaded from Google AI Edge. It is copied into the app and runs locally.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Speech") {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
@@ -154,7 +189,13 @@ struct ContentView: View {
 
     private var readButton: some View {
         Button {
-            viewModel.readDocument()
+            if !viewModel.isGemmaConfigured {
+                isShowingSettings = true
+            } else if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                isShowingCamera = true
+            } else {
+                viewModel.reportCameraUnavailable()
+            }
         } label: {
             VStack(spacing: 10) {
                 if viewModel.status.isBusy {
@@ -165,7 +206,9 @@ struct ContentView: View {
                         .font(.system(size: 34, weight: .semibold))
                 }
 
-                Text(viewModel.status.isBusy ? viewModel.status.actionTitle : "Read this")
+                Text(viewModel.status.isBusy
+                     ? viewModel.status.actionTitle
+                     : viewModel.isGemmaConfigured ? "Read this" : "Set up Gemma")
                     .font(.title2.bold())
             }
             .frame(maxWidth: .infinity, minHeight: 150)
@@ -175,7 +218,9 @@ struct ContentView: View {
         .buttonStyle(.plain)
         .disabled(!viewModel.canRead)
         .opacity(viewModel.canRead || viewModel.status.isBusy ? 1 : 0.55)
-        .accessibilityHint("Captures a document using the connected glasses and reads it aloud")
+        .accessibilityHint(viewModel.isGemmaConfigured
+                           ? "Opens the iPhone camera to capture and read a document"
+                           : "Opens Settings to import an on-device Gemma model")
     }
 
     private var transcriptCard: some View {
