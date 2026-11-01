@@ -33,8 +33,8 @@ struct DocumentQualityAssessor {
                          + 0.7152 * Double(pixel[1])
                          + 0.0722 * Double(pixel[2])) / 255
 
-        if luminance < 0.18 { throw DocumentQualityError.tooDark }
-        if luminance > 0.97 { throw DocumentQualityError.overexposed }
+        if luminance < 0.06 { throw DocumentQualityError.tooDark }
+        if luminance > 0.995 { throw DocumentQualityError.overexposed }
         return .good
     }
 }
@@ -51,11 +51,11 @@ enum DocumentQualityError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .tooSmall:
-            "The image is too small to read reliably. Move closer and try again."
+            "The image is too small to describe reliably. Move closer and try again."
         case .tooDark:
-            "The document is too dark. Add more light and try again."
+            "The scene is almost completely dark. Add more light and try again."
         case .overexposed:
-            "The document is washed out by bright light. Reduce glare and try again."
+            "The image is washed out by bright light. Reduce glare and try again."
         }
     }
 }

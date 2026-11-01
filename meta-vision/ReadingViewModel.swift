@@ -61,9 +61,17 @@ final class ReadingViewModel: ObservableObject {
         show(CameraError.unavailable)
     }
 
+    func reportCameraError(_ error: Error) {
+        show(error)
+    }
+
     func processCapturedImage(_ image: UIImage) {
         guard canRead else { return }
         guard let cgImage = image.normalizedCGImage else {
+            show(CaptureError.imageCreationFailed)
+            return
+        }
+        guard let imageData = cgImage.gemmaJPEGData(maxDimension: 1_280) else {
             show(CaptureError.imageCreationFailed)
             return
         }
@@ -75,17 +83,22 @@ final class ReadingViewModel: ObservableObject {
                 try Task.checkCancellation()
 
                 status = .recognizing
-                let ocrText = try await recognizer.recognizeText(in: cgImage)
+                let ocrText: String?
+                do {
+                    ocrText = try await recognizer.recognizeText(in: cgImage)
+                } catch RecognitionError.noTextFound {
+                    ocrText = nil
+                }
                 try Task.checkCancellation()
 
-                status = .verifying
-                let text = try await gemmaVerifier.verify(ocrText: ocrText)
+                status = .describing
+                let text = try await gemmaVerifier.describe(imageData: imageData, ocrText: ocrText)
                 try Task.checkCancellation()
 
                 recognizedText = text
                 history = historyStore.add(text: text, to: history)
                 status = .speaking
-                speechReader.speak(text, rate: Float(speechRate))
+                try speechReader.speak(text, rate: Float(speechRate))
             } catch is CancellationError {
                 status = .ready(deviceName: "iPhone camera")
             } catch {
@@ -103,10 +116,27 @@ final class ReadingViewModel: ObservableObject {
         }
     }
 
+    func installDownloadedGemmaModel(from url: URL) async {
+        do {
+            try await gemmaVerifier.installDownloadedModel(from: url)
+            isGemmaConfigured = true
+        } catch {
+            show(error)
+        }
+    }
+
+    func reportModelDownloadError(_ error: Error) {
+        show(error)
+    }
+
     func repeatText() {
         guard !recognizedText.isEmpty else { return }
-        status = .speaking
-        speechReader.speak(recognizedText, rate: Float(speechRate))
+        do {
+            status = .speaking
+            try speechReader.speak(recognizedText, rate: Float(speechRate))
+        } catch {
+            show(error)
+        }
     }
 
     func summarize() {
@@ -118,7 +148,7 @@ final class ReadingViewModel: ObservableObject {
                 let summary = try await gemmaVerifier.summarize(recognizedText)
                 try Task.checkCancellation()
                 status = .speaking
-                speechReader.speak("Summary. \(summary)", rate: Float(speechRate))
+                try speechReader.speak("Summary. \(summary)", rate: Float(speechRate))
             } catch is CancellationError {
                 status = .ready(deviceName: "iPhone camera")
             } catch {
@@ -128,14 +158,24 @@ final class ReadingViewModel: ObservableObject {
     }
 
     func previewVoice() {
-        speechReader.speak("This is how Meta Vision will read documents aloud.",
-                           rate: Float(speechRate))
+        do {
+            try speechReader.speak(
+                "This is how Meta Vision will describe the world aloud.",
+                rate: Float(speechRate)
+            )
+        } catch {
+            show(error)
+        }
     }
 
     func open(_ record: ReadingRecord) {
         recognizedText = record.text
-        status = .speaking
-        speechReader.speak(record.text, rate: Float(speechRate))
+        do {
+            status = .speaking
+            try speechReader.speak(record.text, rate: Float(speechRate))
+        } catch {
+            show(error)
+        }
     }
 
     func deleteHistory(at offsets: IndexSet) {
@@ -167,11 +207,37 @@ private extension UIImage {
     }
 }
 
+private extension CGImage {
+    func gemmaJPEGData(maxDimension: CGFloat) -> Data? {
+        let longestEdge = CGFloat(max(width, height))
+        let scale = min(1, maxDimension / longestEdge)
+        let outputSize = CGSize(
+            width: max(1, (CGFloat(width) * scale).rounded()),
+            height: max(1, (CGFloat(height) * scale).rounded())
+        )
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let resized = UIGraphicsImageRenderer(size: outputSize, format: format).image { _ in
+            UIImage(cgImage: self).draw(in: CGRect(origin: .zero, size: outputSize))
+        }
+        return resized.jpegData(compressionQuality: 0.85)
+    }
+}
+
 enum CameraError: LocalizedError {
     case unavailable
+    case permissionDenied
+    case configurationFailed
 
     var errorDescription: String? {
-        "The camera is unavailable. Run Meta Vision on an iPhone and allow camera access in Settings."
+        switch self {
+        case .unavailable:
+            "The camera is unavailable. Run Meta Vision on an iPhone and allow camera access in Settings."
+        case .permissionDenied:
+            "Camera access is off. Allow Meta Vision to use the camera in Settings, then try again."
+        case .configurationFailed:
+            "The camera could not start. Close other camera apps and try again."
+        }
     }
 }
 
@@ -182,7 +248,7 @@ enum ReadingStatus: Equatable {
     case capturing
     case checkingQuality
     case recognizing
-    case verifying
+    case describing
     case summarizing
     case speaking
 
@@ -193,8 +259,8 @@ enum ReadingStatus: Equatable {
         case .ready: "Camera ready"
         case .capturing: "Taking a picture"
         case .checkingQuality: "Checking image quality"
-        case .recognizing: "Reading the document"
-        case .verifying: "Verifying with Gemma"
+        case .recognizing: "Checking visible text"
+        case .describing: "Understanding the scene"
         case .summarizing: "Summarizing with Gemma"
         case .speaking: "Speaking"
         }
@@ -207,10 +273,10 @@ enum ReadingStatus: Equatable {
         case .ready(let deviceName): deviceName
         case .capturing: "Hold still for a moment."
         case .checkingQuality: "Checking lighting and image size."
-        case .recognizing: "Finding and checking text on device."
-        case .verifying: "Correcting OCR errors without changing the facts."
+        case .recognizing: "Looking for useful signs, labels, and document text."
+        case .describing: "Gemma is describing people, objects, actions, and surroundings."
         case .summarizing: "Creating a concise on-device summary."
-        case .speaking: "Reading through the selected audio output."
+        case .speaking: "Speaking the description through the selected audio output."
         }
     }
 
@@ -219,7 +285,7 @@ enum ReadingStatus: Equatable {
         case .capturing: "Capturing…"
         case .checkingQuality: "Checking quality…"
         case .recognizing: "Recognizing…"
-        case .verifying: "Verifying…"
+        case .describing: "Describing…"
         case .summarizing: "Summarizing…"
         case .speaking: "Speaking…"
         case .connectionFailed: "Try again"
@@ -235,7 +301,7 @@ enum ReadingStatus: Equatable {
         case .capturing: "camera.fill"
         case .checkingQuality: "sun.max.fill"
         case .recognizing: "text.viewfinder"
-        case .verifying: "sparkles"
+        case .describing: "sparkles"
         case .summarizing: "text.quote"
         case .speaking: "speaker.wave.2.fill"
         }
@@ -245,13 +311,13 @@ enum ReadingStatus: Equatable {
         switch self {
         case .ready: .green
         case .connectionFailed: .red
-        case .connecting, .capturing, .checkingQuality, .recognizing, .verifying, .summarizing, .speaking: .accentColor
+        case .connecting, .capturing, .checkingQuality, .recognizing, .describing, .summarizing, .speaking: .accentColor
         }
     }
 
     var isBusy: Bool {
         switch self {
-        case .capturing, .checkingQuality, .recognizing, .verifying, .summarizing, .speaking: true
+        case .capturing, .checkingQuality, .recognizing, .describing, .summarizing, .speaking: true
         case .connecting, .connectionFailed, .ready: false
         }
     }

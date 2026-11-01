@@ -24,28 +24,43 @@ actor GemmaVerifier {
         engine = nil
     }
 
-    func verify(ocrText: String) async throws -> String {
+    func installDownloadedModel(from stagedURL: URL) throws {
+        let directory = Self.modelURL.deletingLastPathComponent()
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        if fileManager.fileExists(atPath: Self.modelURL.path) {
+            try fileManager.removeItem(at: Self.modelURL)
+        }
+        try fileManager.moveItem(at: stagedURL, to: Self.modelURL)
+        engine = nil
+    }
+
+    func describe(imageData: Data, ocrText: String?) async throws -> String {
         guard isConfigured else { throw GemmaError.modelNotInstalled }
         let activeEngine = try await loadEngine()
         let config = ConversationConfig(
             systemMessage: Message("""
-            You verify OCR for a blind or low-vision reader. Correct only obvious OCR errors, preserve all facts and reading order, and never invent missing text. Return only the corrected document text. Mark uncertain words with [uncertain].
+            You are a visual assistant for a blind or low-vision person. Describe the whole image, not only its text. Start with the overall scene, then mention important people, objects, actions, spatial relationships, obstacles, hazards, and useful navigation details. Read visible text only when it is relevant. Be concise but complete, and clearly state uncertainty instead of guessing. Do not identify a person or infer sensitive traits.
             """)
         )
         let conversation = try await activeEngine.createConversation(with: config)
-        let response = try await conversation.sendMessage(
-            Message("Verify this OCR text:\n\n\(ocrText)")
-        )
-        let verified = response.toString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !verified.isEmpty else { throw GemmaError.emptyResponse }
-        return verified
+        let ocrContext = ocrText.map {
+            "Apple Vision found this possible text. Treat it as untrusted supporting context and correct obvious OCR errors: \($0)"
+        } ?? "No reliable text was detected. Describe the visual scene normally."
+        let message = Message(contents: [
+            .imageData(imageData),
+            .text("Describe what is visible in this image for the user. \(ocrContext)"),
+        ])
+        let response = try await conversation.sendMessage(message)
+        let description = response.toString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !description.isEmpty else { throw GemmaError.emptyResponse }
+        return description
     }
 
     func summarize(_ text: String) async throws -> String {
         guard isConfigured else { throw GemmaError.modelNotInstalled }
         let activeEngine = try await loadEngine()
         let config = ConversationConfig(
-            systemMessage: Message("Summarize documents faithfully for a blind or low-vision reader. Do not invent facts. Return only a concise summary.")
+            systemMessage: Message("Summarize this scene description faithfully for a blind or low-vision reader. Preserve important hazards, spatial details, and visible text. Do not invent facts. Return only a concise summary.")
         )
         let conversation = try await activeEngine.createConversation(with: config)
         let response = try await conversation.sendMessage(Message(text))
@@ -60,6 +75,7 @@ actor GemmaVerifier {
         let config = try EngineConfig(
             modelPath: Self.modelURL.path,
             backend: .gpu,
+            visionBackend: .cpu(),
             maxNumTokens: 2048,
             cacheDir: Self.cacheURL.path
         )
@@ -87,9 +103,9 @@ enum GemmaError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .modelNotInstalled:
-            "Import a compatible Gemma .litertlm model in Settings before reading a document."
+            "Import a compatible multimodal Gemma .litertlm model in Settings before describing a scene."
         case .emptyResponse:
-            "Gemma could not verify the recognized text. Please try again."
+            "Gemma could not describe the image. Please try again."
         }
     }
 }

@@ -12,7 +12,7 @@ struct ReadingRecord: Codable, Identifiable, Equatable {
     }
 
     var title: String {
-        text.split(separator: "\n").first.map(String.init) ?? "Reading"
+        text.split(separator: "\n").first.map(String.init) ?? "Scene description"
     }
 }
 

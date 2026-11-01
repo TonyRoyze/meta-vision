@@ -1,15 +1,101 @@
+import Combine
 import CoreGraphics
 import UIKit
 
-protocol GlassesCaptureProviding {
+protocol GlassesCaptureProviding: Sendable {
     var deviceName: String { get }
 
     func connect() async throws
-    func captureDocument() async throws -> CGImage
+    func captureImage() async throws -> CGImage
 }
 
-/// Development provider that keeps the full capture and OCR flow runnable
-/// without requiring physical Meta glasses.
+@MainActor
+final class GlassesConnectionViewModel: ObservableObject {
+    @Published private(set) var state: GlassesConnectionState = .disconnected
+
+    private let provider: any GlassesCaptureProviding
+    private var connectionTask: Task<Void, Never>?
+
+    init() {
+        self.provider = MockGlassesCaptureProvider()
+    }
+
+    init(provider: any GlassesCaptureProviding) {
+        self.provider = provider
+    }
+
+    func connect() {
+        guard state.canConnect else { return }
+        state = .connecting
+        let provider = provider
+        connectionTask = Task { [weak self] in
+            do {
+                try await provider.connect()
+                try Task.checkCancellation()
+                self?.state = .connected(deviceName: provider.deviceName)
+            } catch is CancellationError {
+                self?.state = .disconnected
+            } catch {
+                self?.state = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    func disconnect() {
+        connectionTask?.cancel()
+        connectionTask = nil
+        state = .disconnected
+    }
+}
+
+enum GlassesConnectionState: Equatable {
+    case disconnected
+    case connecting
+    case connected(deviceName: String)
+    case failed(String)
+
+    var title: String {
+        switch self {
+        case .disconnected: "Not connected"
+        case .connecting: "Looking for glasses…"
+        case .connected(let deviceName): deviceName
+        case .failed: "Connection failed"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .disconnected: "Connect Meta Ray-Bans for hands-free capture."
+        case .connecting: "Keep your glasses nearby and powered on."
+        case .connected: "Ready for the future glasses capture adapter."
+        case .failed(let message): message
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .disconnected: "eyeglasses"
+        case .connecting: "antenna.radiowaves.left.and.right"
+        case .connected: "checkmark.circle.fill"
+        case .failed: "exclamationmark.triangle.fill"
+        }
+    }
+
+    var canConnect: Bool {
+        switch self {
+        case .disconnected, .failed: true
+        case .connecting, .connected: false
+        }
+    }
+
+    var isConnected: Bool {
+        if case .connected = self { return true }
+        return false
+    }
+}
+
+/// Development provider that keeps the glasses connection and capture seam runnable
+/// without claiming to communicate with physical Meta glasses.
 struct MockGlassesCaptureProvider: GlassesCaptureProviding {
     let deviceName = "Demo Ray-Ban glasses"
 
@@ -18,7 +104,7 @@ struct MockGlassesCaptureProvider: GlassesCaptureProviding {
     }
 
     @MainActor
-    func captureDocument() async throws -> CGImage {
+    func captureImage() async throws -> CGImage {
         try await Task.sleep(for: .milliseconds(500))
 
         let size = CGSize(width: 1200, height: 1600)
